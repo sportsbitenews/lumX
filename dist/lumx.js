@@ -874,785 +874,6 @@
     'use strict';
 
     angular
-        .module('lumx.date-picker')
-        .directive('lxDatePicker', lxDatePicker);
-
-    lxDatePicker.$inject = ['LxDatePickerService', 'LxUtils'];
-
-    function lxDatePicker(LxDatePickerService, LxUtils)
-    {
-        return {
-            restrict: 'AE',
-            templateUrl: 'date-picker.html',
-            scope:
-            {
-                autoClose: '=?lxAutoClose',
-                callback: '&?lxCallback',
-                color: '@?lxColor',
-                escapeClose: '=?lxEscapeClose',
-                inputFormat: '@?lxInputFormat',
-                maxDate: '=?lxMaxDate',
-                ngModel: '=',
-                minDate: '=?lxMinDate',
-                locale: '@lxLocale'
-            },
-            link: link,
-            controller: LxDatePickerController,
-            controllerAs: 'lxDatePicker',
-            bindToController: true,
-            replace: true,
-            transclude: true
-        };
-
-        function link(scope, element, attrs)
-        {
-            if (angular.isDefined(attrs.id))
-            {
-                attrs.$observe('id', function(_newId)
-                {
-                    scope.lxDatePicker.pickerId = _newId;
-                    LxDatePickerService.registerScope(scope.lxDatePicker.pickerId, scope);
-                });
-            }
-            else
-            {
-                scope.lxDatePicker.pickerId = LxUtils.generateUUID();
-                LxDatePickerService.registerScope(scope.lxDatePicker.pickerId, scope);
-            }
-        }
-    }
-
-    LxDatePickerController.$inject = ['$element', '$scope', '$timeout', '$transclude', 'LxDatePickerService', 'LxUtils'];
-
-    function LxDatePickerController($element, $scope, $timeout, $transclude, LxDatePickerService, LxUtils)
-    {
-        var lxDatePicker = this;
-        var input;
-        var modelController;
-        var timer1;
-        var timer2;
-        var watcher1;
-        var watcher2;
-
-        lxDatePicker.closeDatePicker = closeDatePicker;
-        lxDatePicker.displayYearSelection = displayYearSelection;
-        lxDatePicker.hideYearSelection = hideYearSelection;
-        lxDatePicker.getDateFormatted = getDateFormatted;
-        lxDatePicker.nextMonth = nextMonth;
-        lxDatePicker.openDatePicker = openDatePicker;
-        lxDatePicker.previousMonth = previousMonth;
-        lxDatePicker.select = select;
-        lxDatePicker.selectYear = selectYear;
-
-        lxDatePicker.autoClose = angular.isDefined(lxDatePicker.autoClose) ? lxDatePicker.autoClose : true;
-        lxDatePicker.color = angular.isDefined(lxDatePicker.color) ? lxDatePicker.color : 'primary';
-        lxDatePicker.element = $element.find('.lx-date-picker');
-        lxDatePicker.escapeClose = angular.isDefined(lxDatePicker.escapeClose) ? lxDatePicker.escapeClose : true;
-        lxDatePicker.isOpen = false;
-        lxDatePicker.moment = moment;
-        lxDatePicker.yearSelection = false;
-        lxDatePicker.uuid = LxUtils.generateUUID();
-
-        $transclude(function(clone)
-        {
-            if (clone.length)
-            {
-                lxDatePicker.hasInput = true;
-
-                timer1 = $timeout(function()
-                {
-                    input = $element.find('.lx-date-input input');
-                    modelController = input.data('$ngModelController');
-
-                    watcher2 = $scope.$watch(function()
-                    {
-                        return modelController.$viewValue;
-                    }, function(newValue, oldValue)
-                    {
-                        if (angular.isUndefined(newValue))
-                        {
-                            lxDatePicker.ngModel = undefined;
-                        }
-                    });
-                });
-            }
-        });
-
-        watcher1 = $scope.$watch(function()
-        {
-            return lxDatePicker.ngModel;
-        }, init);
-
-        $scope.$on('$destroy', function()
-        {
-            $timeout.cancel(timer1);
-            $timeout.cancel(timer2);
-
-            if (angular.isFunction(watcher1))
-            {
-                watcher1();
-            }
-
-            if (angular.isFunction(watcher2))
-            {
-                watcher2();
-            }
-        });
-
-        ////////////
-
-        function closeDatePicker()
-        {
-            LxDatePickerService.close(lxDatePicker.pickerId);
-        }
-
-        function displayYearSelection()
-        {
-            lxDatePicker.yearSelection = true;
-
-            timer2 = $timeout(function()
-            {
-                var yearSelector = angular.element('.lx-date-picker__year-selector');
-                var activeYear = yearSelector.find('.lx-date-picker__year--is-active');
-
-                yearSelector.scrollTop(yearSelector.scrollTop() + activeYear.position().top - yearSelector.height() / 2 + activeYear.height() / 2);
-            });
-        }
-
-        function hideYearSelection()
-        {
-            lxDatePicker.yearSelection = false;
-        }
-
-        function generateCalendar()
-        {
-            lxDatePicker.days = [];
-
-            var previousDay = angular.copy(lxDatePicker.ngModelMoment).date(0);
-            var firstDayOfMonth = angular.copy(lxDatePicker.ngModelMoment).date(1);
-            var lastDayOfMonth = firstDayOfMonth.clone().endOf('month');
-            var maxDays = lastDayOfMonth.date();
-
-            lxDatePicker.emptyFirstDays = [];
-
-            for (var i = firstDayOfMonth.day() === 0 ? 6 : firstDayOfMonth.day() - 1; i > 0; i--)
-            {
-                lxDatePicker.emptyFirstDays.push(
-                {});
-            }
-
-            for (var j = 0; j < maxDays; j++)
-            {
-                var date = angular.copy(previousDay.add(1, 'days'));
-
-                date.selected = angular.isDefined(lxDatePicker.ngModel) && date.isSame(lxDatePicker.ngModel, 'day');
-                date.today = date.isSame(moment(), 'day');
-
-                if (angular.isDefined(lxDatePicker.minDate) && date.toDate() < lxDatePicker.minDate)
-                {
-                    date.disabled = true;
-                }
-
-                if (angular.isDefined(lxDatePicker.maxDate) && date.toDate() > lxDatePicker.maxDate)
-                {
-                    date.disabled = true;
-                }
-
-                lxDatePicker.days.push(date);
-            }
-
-            lxDatePicker.emptyLastDays = [];
-
-            for (var k = 7 - (lastDayOfMonth.day() === 0 ? 7 : lastDayOfMonth.day()); k > 0; k--)
-            {
-                lxDatePicker.emptyLastDays.push(
-                {});
-            }
-        }
-
-        function getDateFormatted()
-        {
-            var dateFormatted = lxDatePicker.ngModelMoment.format('llll').replace(lxDatePicker.ngModelMoment.format('LT'), '').trim().replace(lxDatePicker.ngModelMoment.format('YYYY'), '').trim();
-            var dateFormattedLastChar = dateFormatted.slice(-1);
-
-            if (dateFormattedLastChar === ',')
-            {
-                dateFormatted = dateFormatted.slice(0, -1);
-            }
-
-            return dateFormatted;
-        }
-
-        function init()
-        {
-            moment.locale(lxDatePicker.locale);
-
-            lxDatePicker.ngModelMoment = angular.isDefined(lxDatePicker.ngModel) ? moment(angular.copy(lxDatePicker.ngModel)) : moment();
-            lxDatePicker.days = [];
-            lxDatePicker.daysOfWeek = [moment.weekdaysMin(1), moment.weekdaysMin(2), moment.weekdaysMin(3), moment.weekdaysMin(4), moment.weekdaysMin(5), moment.weekdaysMin(6), moment.weekdaysMin(0)];
-            lxDatePicker.years = [];
-
-            for (var y = moment().year() - 100; y <= moment().year() + 100; y++)
-            {
-                lxDatePicker.years.push(y);
-            }
-
-            generateCalendar();
-        }
-
-        function nextMonth()
-        {
-            lxDatePicker.ngModelMoment = lxDatePicker.ngModelMoment.add(1, 'month');
-
-            generateCalendar();
-        }
-
-        function openDatePicker()
-        {
-            LxDatePickerService.open(lxDatePicker.pickerId);
-        }
-
-        function previousMonth()
-        {
-            lxDatePicker.ngModelMoment = lxDatePicker.ngModelMoment.subtract(1, 'month');
-
-            generateCalendar();
-        }
-
-        function select(_day)
-        {
-            if (!_day.disabled)
-            {
-                lxDatePicker.ngModel = _day.toDate();
-                lxDatePicker.ngModelMoment = angular.copy(_day);
-
-                if (angular.isDefined(lxDatePicker.callback))
-                {
-                    lxDatePicker.callback(
-                    {
-                        newDate: lxDatePicker.ngModel
-                    });
-                }
-
-                if (angular.isDefined(modelController) && lxDatePicker.inputFormat)
-                {
-                    modelController.$setViewValue(angular.copy(_day).format(lxDatePicker.inputFormat));
-                    modelController.$render();
-                }
-
-                generateCalendar();
-            }
-        }
-
-        function selectYear(_year)
-        {
-            lxDatePicker.yearSelection = false;
-
-            lxDatePicker.ngModelMoment = lxDatePicker.ngModelMoment.year(_year);
-
-            generateCalendar();
-        }
-    }
-})();
-(function()
-{
-    'use strict';
-
-    angular
-        .module('lumx.date-picker')
-        .service('LxDatePickerService', LxDatePickerService);
-
-    LxDatePickerService.$inject = ['$rootScope', '$timeout', 'LxDepthService', 'LxEventSchedulerService'];
-
-    function LxDatePickerService($rootScope, $timeout, LxDepthService, LxEventSchedulerService)
-    {
-        var service = this;
-        var activeDatePickerId;
-        var datePickerFilter;
-        var idEventScheduler;
-        var scopeMap = {};
-
-        service.close = closeDatePicker;
-        service.open = openDatePicker;
-        service.registerScope = registerScope;
-
-        ////////////
-
-        function closeDatePicker(_datePickerId)
-        {
-            if (angular.isDefined(idEventScheduler))
-            {
-                LxEventSchedulerService.unregister(idEventScheduler);
-                idEventScheduler = undefined;
-            }
-
-            activeDatePickerId = undefined;
-
-            $rootScope.$broadcast('lx-date-picker__close-start', _datePickerId);
-
-            datePickerFilter.removeClass('lx-date-picker-filter--is-shown');
-            scopeMap[_datePickerId].element.removeClass('lx-date-picker--is-shown');
-
-            $timeout(function()
-            {
-                angular.element('body').removeClass('no-scroll-date-picker-' + scopeMap[_datePickerId].uuid);
-
-                datePickerFilter.remove();
-
-                scopeMap[_datePickerId].element
-                    .hide()
-                    .appendTo(scopeMap[_datePickerId].elementParent);
-
-                scopeMap[_datePickerId].isOpen = false;
-                $rootScope.$broadcast('lx-date-picker__close-end', _datePickerId);
-            }, 600);
-        }
-
-        function onKeyUp(_event)
-        {
-            if (_event.keyCode == 27 && angular.isDefined(activeDatePickerId))
-            {
-                closeDatePicker(activeDatePickerId);
-            }
-
-            _event.stopPropagation();
-        }
-
-        function openDatePicker(_datePickerId)
-        {
-            LxDepthService.register();
-
-            activeDatePickerId = _datePickerId;
-
-            angular.element('body').addClass('no-scroll-date-picker-' + scopeMap[_datePickerId].uuid);
-
-            datePickerFilter = angular.element('<div/>',
-            {
-                class: 'lx-date-picker-filter'
-            });
-
-            datePickerFilter
-                .css('z-index', LxDepthService.getDepth())
-                .appendTo('body');
-
-            if (scopeMap[activeDatePickerId].autoClose)
-            {
-                datePickerFilter.on('click', function()
-                {
-                    closeDatePicker(activeDatePickerId);
-                });
-            }
-
-            if (scopeMap[activeDatePickerId].escapeClose)
-            {
-                idEventScheduler = LxEventSchedulerService.register('keyup', onKeyUp);
-            }
-
-            scopeMap[activeDatePickerId].element
-                .css('z-index', LxDepthService.getDepth() + 1)
-                .appendTo('body')
-                .show();
-
-            $timeout(function()
-            {
-                $rootScope.$broadcast('lx-date-picker__open-start', activeDatePickerId);
-
-                scopeMap[activeDatePickerId].isOpen = true;
-
-                datePickerFilter.addClass('lx-date-picker-filter--is-shown');
-                scopeMap[activeDatePickerId].element.addClass('lx-date-picker--is-shown');
-            }, 100);
-
-            $timeout(function()
-            {
-                $rootScope.$broadcast('lx-date-picker__open-end', activeDatePickerId);
-            }, 700);
-        }
-
-        function registerScope(_datePickerId, _datePickerScope)
-        {
-            scopeMap[_datePickerId] = _datePickerScope.lxDatePicker;
-        }
-    }
-})();
-(function()
-{
-    'use strict';
-
-    angular
-        .module('lumx.dialog')
-        .directive('lxDialog', lxDialog)
-        .directive('lxDialogHeader', lxDialogHeader)
-        .directive('lxDialogContent', lxDialogContent)
-        .directive('lxDialogFooter', lxDialogFooter)
-        .directive('lxDialogClose', lxDialogClose);
-
-    function lxDialog()
-    {
-        return {
-            restrict: 'E',
-            template: '<div class="dialog" ng-class="{ \'dialog--l\': !lxDialog.size || lxDialog.size === \'l\', \'dialog--s\': lxDialog.size === \'s\', \'dialog--m\': lxDialog.size === \'m\' }"><div ng-if="lxDialog.isOpen" ng-transclude></div></div>',
-            scope:
-            {
-                autoClose: '=?lxAutoClose',
-                escapeClose: '=?lxEscapeClose',
-                size: '@?lxSize'
-            },
-            link: link,
-            controller: LxDialogController,
-            controllerAs: 'lxDialog',
-            bindToController: true,
-            replace: true,
-            transclude: true
-        };
-
-        function link(scope, element, attrs, ctrl)
-        {
-            attrs.$observe('id', function(_newId)
-            {
-                ctrl.id = _newId;
-            });
-        }
-    }
-
-    LxDialogController.$inject = ['$element', '$interval', '$rootScope', '$scope', '$timeout', '$window', 'LxDepthService', 'LxEventSchedulerService', 'LxUtils'];
-
-    function LxDialogController($element, $interval, $rootScope, $scope, $timeout, $window, LxDepthService, LxEventSchedulerService, LxUtils)
-    {
-        var lxDialog = this;
-        var dialogFilter = angular.element('<div/>',
-        {
-            class: 'dialog-filter'
-        });
-        var dialogHeight;
-        var dialogInterval;
-        var dialogScrollable;
-        var elementParent = $element.parent();
-        var idEventScheduler;
-        var resizeDebounce;
-        var windowHeight;
-
-        lxDialog.autoClose = angular.isDefined(lxDialog.autoClose) ? lxDialog.autoClose : true;
-        lxDialog.escapeClose = angular.isDefined(lxDialog.escapeClose) ? lxDialog.escapeClose : true;
-        lxDialog.isOpen = false;
-        lxDialog.uuid = LxUtils.generateUUID();
-
-        $scope.$on('lx-dialog__open', function(event, id, params)
-        {
-            if (id === lxDialog.id)
-            {
-                open(params);
-            }
-        });
-
-        $scope.$on('lx-dialog__close', function(event, id, canceled, params)
-        {
-            if (id === lxDialog.id)
-            {
-                close(canceled, params);
-            }
-        });
-
-        $scope.$on('$destroy', function()
-        {
-            close(true);
-        });
-
-        ////////////
-
-        function checkDialogHeight()
-        {
-            var dialog = $element;
-            var dialogHeader = dialog.find('.dialog__header');
-            var dialogContent = dialog.find('.dialog__content');
-            var dialogFooter = dialog.find('.dialog__footer');
-
-            if (!dialogFooter.length)
-            {
-                dialogFooter = dialog.find('.dialog__actions');
-            }
-
-            if (angular.isUndefined(dialogHeader))
-            {
-                return;
-            }
-
-            var heightToCheck = 60 + dialogHeader.outerHeight() + dialogContent.outerHeight() + dialogFooter.outerHeight();
-
-            if (dialogHeight === heightToCheck && windowHeight === $window.innerHeight)
-            {
-                return;
-            }
-
-            dialogHeight = heightToCheck;
-            windowHeight = $window.innerHeight;
-
-            if (heightToCheck >= $window.innerHeight)
-            {
-                dialog.addClass('dialog--is-fixed');
-
-                dialogScrollable
-                    .css(
-                    {
-                        top: dialogHeader.outerHeight(),
-                        bottom: dialogFooter.outerHeight()
-                    })
-                    .off('scroll', checkScrollEnd)
-                    .on('scroll', checkScrollEnd);
-            }
-            else
-            {
-                dialog.removeClass('dialog--is-fixed');
-
-                dialogScrollable
-                    .removeAttr('style')
-                    .off('scroll', checkScrollEnd);
-            }
-        }
-
-        function checkDialogHeightOnResize()
-        {
-            if (resizeDebounce)
-            {
-                $timeout.cancel(resizeDebounce);
-            }
-
-            resizeDebounce = $timeout(function()
-            {
-                checkDialogHeight();
-            }, 200);
-        }
-
-        function checkScrollEnd()
-        {
-            if (dialogScrollable.scrollTop() + dialogScrollable.innerHeight() >= dialogScrollable[0].scrollHeight)
-            {
-                $rootScope.$broadcast('lx-dialog__scroll-end', lxDialog.id);
-
-                dialogScrollable.off('scroll', checkScrollEnd);
-
-                $timeout(function()
-                {
-                    dialogScrollable.on('scroll', checkScrollEnd);
-                }, 500);
-            }
-        }
-
-        function onKeyUp(_event)
-        {
-            if (_event.keyCode == 27)
-            {
-                close(true);
-            }
-
-            _event.stopPropagation();
-        }
-
-        function open(_params)
-        {
-            if (lxDialog.isOpen)
-            {
-                return;
-            }
-
-            LxDepthService.register();
-
-            angular.element('body').addClass('no-scroll-dialog-' + lxDialog.uuid);
-
-            dialogFilter
-                .css('z-index', LxDepthService.getDepth())
-                .appendTo('body');
-
-            if (lxDialog.autoClose)
-            {
-                dialogFilter.on('click', function()
-                {
-                    close(true);
-                });
-            }
-
-            if (lxDialog.escapeClose)
-            {
-                idEventScheduler = LxEventSchedulerService.register('keyup', onKeyUp);
-            }
-
-            $element
-                .css('z-index', LxDepthService.getDepth() + 1)
-                .appendTo('body')
-                .show();
-
-            $timeout(function()
-            {
-                $rootScope.$broadcast('lx-dialog__open-start', lxDialog.id, _params);
-
-                lxDialog.isOpen = true;
-
-                dialogFilter.addClass('dialog-filter--is-shown');
-                $element.addClass('dialog--is-shown');
-            }, 100);
-
-            $timeout(function()
-            {
-                if ($element.find('.dialog__scrollable').length === 0)
-                {
-                    $element.find('.dialog__content').wrap(angular.element('<div/>',
-                    {
-                        class: 'dialog__scrollable'
-                    }));
-                }
-
-                dialogScrollable = $element.find('.dialog__scrollable');
-            }, 200);
-
-            $timeout(function()
-            {
-                $rootScope.$broadcast('lx-dialog__open-end', lxDialog.id, _params);
-            }, 700);
-
-            dialogInterval = $interval(function()
-            {
-                checkDialogHeight();
-            }, 500);
-
-            angular.element($window).on('resize', checkDialogHeightOnResize);
-        }
-
-        function close(_canceled, _params)
-        {
-            if (!lxDialog.isOpen)
-            {
-                return;
-            }
-
-            _params = _params || {};
-
-            if (angular.isDefined(idEventScheduler))
-            {
-                LxEventSchedulerService.unregister(idEventScheduler);
-                idEventScheduler = undefined;
-            }
-
-            angular.element($window).off('resize', checkDialogHeightOnResize);
-            $element.find('.dialog__scrollable').off('scroll', checkScrollEnd);
-
-            $rootScope.$broadcast('lx-dialog__close-start', lxDialog.id, _canceled, _params);
-
-            if (resizeDebounce)
-            {
-                $timeout.cancel(resizeDebounce);
-            }
-
-            $interval.cancel(dialogInterval);
-
-            dialogFilter.removeClass('dialog-filter--is-shown');
-            $element.removeClass('dialog--is-shown');
-
-            $timeout(function()
-            {
-                angular.element('body').removeClass('no-scroll-dialog-' + lxDialog.uuid);
-
-                dialogFilter.remove();
-
-                $element
-                    .hide()
-                    .removeClass('dialog--is-fixed')
-                    .appendTo(elementParent);
-
-                lxDialog.isOpen = false;
-                dialogHeight = undefined;
-                $rootScope.$broadcast('lx-dialog__close-end', lxDialog.id, _canceled, _params);
-            }, 600);
-        }
-    }
-
-    function lxDialogHeader()
-    {
-        return {
-            restrict: 'E',
-            template: '<div class="dialog__header" ng-transclude></div>',
-            replace: true,
-            transclude: true
-        };
-    }
-
-    function lxDialogContent()
-    {
-        return {
-            restrict: 'E',
-            template: '<div class="dialog__scrollable"><div class="dialog__content" ng-transclude></div></div>',
-            replace: true,
-            transclude: true
-        };
-    }
-
-    function lxDialogFooter()
-    {
-        return {
-            restrict: 'E',
-            template: '<div class="dialog__footer" ng-transclude></div>',
-            replace: true,
-            transclude: true
-        };
-    }
-
-    lxDialogClose.$inject = ['LxDialogService'];
-
-    function lxDialogClose(LxDialogService)
-    {
-        return {
-            restrict: 'A',
-            link: function(scope, element)
-            {
-                element.on('click', function()
-                {
-                    LxDialogService.close(element.parents('.dialog').attr('id'), true);
-                });
-
-                scope.$on('$destroy', function()
-                {
-                    element.off();
-                });
-            }
-        };
-    }
-})();
-
-(function()
-{
-    'use strict';
-
-    angular
-        .module('lumx.dialog')
-        .service('LxDialogService', LxDialogService);
-
-    LxDialogService.$inject = ['$rootScope'];
-
-    function LxDialogService($rootScope)
-    {
-        var service = this;
-
-        service.open = open;
-        service.close = close;
-
-        ////////////
-
-        function open(_dialogId, _params)
-        {
-            $rootScope.$broadcast('lx-dialog__open', _dialogId, _params);
-        }
-
-        function close(_dialogId, _canceled, _params)
-        {
-            $rootScope.$broadcast('lx-dialog__close', _dialogId, _canceled, _params);
-        }
-    }
-})();
-
-(function()
-{
-    'use strict';
-
-    angular
         .module('lumx.dropdown')
         .directive('lxDropdown', lxDropdown)
         .directive('lxDropdownToggle', lxDropdownToggle)
@@ -2539,76 +1760,780 @@
     'use strict';
 
     angular
-        .module('lumx.fab')
-        .directive('lxFab', lxFab)
-        .directive('lxFabTrigger', lxFabTrigger)
-        .directive('lxFabActions', lxFabActions);
+        .module('lumx.date-picker')
+        .directive('lxDatePicker', lxDatePicker);
 
-    function lxFab()
+    lxDatePicker.$inject = ['LxDatePickerService', 'LxUtils'];
+
+    function lxDatePicker(LxDatePickerService, LxUtils)
+    {
+        return {
+            restrict: 'AE',
+            templateUrl: 'date-picker.html',
+            scope:
+            {
+                autoClose: '=?lxAutoClose',
+                callback: '&?lxCallback',
+                color: '@?lxColor',
+                escapeClose: '=?lxEscapeClose',
+                inputFormat: '@?lxInputFormat',
+                maxDate: '=?lxMaxDate',
+                ngModel: '=',
+                minDate: '=?lxMinDate',
+                locale: '@lxLocale'
+            },
+            link: link,
+            controller: LxDatePickerController,
+            controllerAs: 'lxDatePicker',
+            bindToController: true,
+            replace: true,
+            transclude: true
+        };
+
+        function link(scope, element, attrs)
+        {
+            if (angular.isDefined(attrs.id))
+            {
+                attrs.$observe('id', function(_newId)
+                {
+                    scope.lxDatePicker.pickerId = _newId;
+                    LxDatePickerService.registerScope(scope.lxDatePicker.pickerId, scope);
+                });
+            }
+            else
+            {
+                scope.lxDatePicker.pickerId = LxUtils.generateUUID();
+                LxDatePickerService.registerScope(scope.lxDatePicker.pickerId, scope);
+            }
+        }
+    }
+
+    LxDatePickerController.$inject = ['$element', '$scope', '$timeout', '$transclude', 'LxDatePickerService', 'LxUtils'];
+
+    function LxDatePickerController($element, $scope, $timeout, $transclude, LxDatePickerService, LxUtils)
+    {
+        var lxDatePicker = this;
+        var input;
+        var modelController;
+        var timer1;
+        var timer2;
+        var watcher1;
+        var watcher2;
+
+        lxDatePicker.closeDatePicker = closeDatePicker;
+        lxDatePicker.displayYearSelection = displayYearSelection;
+        lxDatePicker.hideYearSelection = hideYearSelection;
+        lxDatePicker.getDateFormatted = getDateFormatted;
+        lxDatePicker.nextMonth = nextMonth;
+        lxDatePicker.openDatePicker = openDatePicker;
+        lxDatePicker.previousMonth = previousMonth;
+        lxDatePicker.select = select;
+        lxDatePicker.selectYear = selectYear;
+
+        lxDatePicker.autoClose = angular.isDefined(lxDatePicker.autoClose) ? lxDatePicker.autoClose : true;
+        lxDatePicker.color = angular.isDefined(lxDatePicker.color) ? lxDatePicker.color : 'primary';
+        lxDatePicker.element = $element.find('.lx-date-picker');
+        lxDatePicker.escapeClose = angular.isDefined(lxDatePicker.escapeClose) ? lxDatePicker.escapeClose : true;
+        lxDatePicker.isOpen = false;
+        lxDatePicker.moment = moment;
+        lxDatePicker.yearSelection = false;
+        lxDatePicker.uuid = LxUtils.generateUUID();
+
+        $transclude(function(clone)
+        {
+            if (clone.length)
+            {
+                lxDatePicker.hasInput = true;
+
+                timer1 = $timeout(function()
+                {
+                    input = $element.find('.lx-date-input input');
+                    modelController = input.data('$ngModelController');
+
+                    watcher2 = $scope.$watch(function()
+                    {
+                        return modelController.$viewValue;
+                    }, function(newValue, oldValue)
+                    {
+                        if (angular.isUndefined(newValue))
+                        {
+                            lxDatePicker.ngModel = undefined;
+                        }
+                    });
+                });
+            }
+        });
+
+        watcher1 = $scope.$watch(function()
+        {
+            return lxDatePicker.ngModel;
+        }, init);
+
+        $scope.$on('$destroy', function()
+        {
+            $timeout.cancel(timer1);
+            $timeout.cancel(timer2);
+
+            if (angular.isFunction(watcher1))
+            {
+                watcher1();
+            }
+
+            if (angular.isFunction(watcher2))
+            {
+                watcher2();
+            }
+        });
+
+        ////////////
+
+        function closeDatePicker()
+        {
+            LxDatePickerService.close(lxDatePicker.pickerId);
+        }
+
+        function displayYearSelection()
+        {
+            lxDatePicker.yearSelection = true;
+
+            timer2 = $timeout(function()
+            {
+                var yearSelector = angular.element('.lx-date-picker__year-selector');
+                var activeYear = yearSelector.find('.lx-date-picker__year--is-active');
+
+                yearSelector.scrollTop(yearSelector.scrollTop() + activeYear.position().top - yearSelector.height() / 2 + activeYear.height() / 2);
+            });
+        }
+
+        function hideYearSelection()
+        {
+            lxDatePicker.yearSelection = false;
+        }
+
+        function generateCalendar()
+        {
+            lxDatePicker.days = [];
+
+            var previousDay = angular.copy(lxDatePicker.ngModelMoment).date(0);
+            var firstDayOfMonth = angular.copy(lxDatePicker.ngModelMoment).date(1);
+            var lastDayOfMonth = firstDayOfMonth.clone().endOf('month');
+            var maxDays = lastDayOfMonth.date();
+
+            lxDatePicker.emptyFirstDays = [];
+
+            for (var i = firstDayOfMonth.day() === 0 ? 6 : firstDayOfMonth.day() - 1; i > 0; i--)
+            {
+                lxDatePicker.emptyFirstDays.push(
+                {});
+            }
+
+            for (var j = 0; j < maxDays; j++)
+            {
+                var date = angular.copy(previousDay.add(1, 'days'));
+
+                date.selected = angular.isDefined(lxDatePicker.ngModel) && date.isSame(lxDatePicker.ngModel, 'day');
+                date.today = date.isSame(moment(), 'day');
+
+                if (angular.isDefined(lxDatePicker.minDate) && date.toDate() < lxDatePicker.minDate)
+                {
+                    date.disabled = true;
+                }
+
+                if (angular.isDefined(lxDatePicker.maxDate) && date.toDate() > lxDatePicker.maxDate)
+                {
+                    date.disabled = true;
+                }
+
+                lxDatePicker.days.push(date);
+            }
+
+            lxDatePicker.emptyLastDays = [];
+
+            for (var k = 7 - (lastDayOfMonth.day() === 0 ? 7 : lastDayOfMonth.day()); k > 0; k--)
+            {
+                lxDatePicker.emptyLastDays.push(
+                {});
+            }
+        }
+
+        function getDateFormatted()
+        {
+            var dateFormatted = lxDatePicker.ngModelMoment.format('llll').replace(lxDatePicker.ngModelMoment.format('LT'), '').trim().replace(lxDatePicker.ngModelMoment.format('YYYY'), '').trim();
+            var dateFormattedLastChar = dateFormatted.slice(-1);
+
+            if (dateFormattedLastChar === ',')
+            {
+                dateFormatted = dateFormatted.slice(0, -1);
+            }
+
+            return dateFormatted;
+        }
+
+        function init()
+        {
+            moment.locale(lxDatePicker.locale);
+
+            lxDatePicker.ngModelMoment = angular.isDefined(lxDatePicker.ngModel) ? moment(angular.copy(lxDatePicker.ngModel)) : moment();
+            lxDatePicker.days = [];
+            lxDatePicker.daysOfWeek = [moment.weekdaysMin(1), moment.weekdaysMin(2), moment.weekdaysMin(3), moment.weekdaysMin(4), moment.weekdaysMin(5), moment.weekdaysMin(6), moment.weekdaysMin(0)];
+            lxDatePicker.years = [];
+
+            for (var y = moment().year() - 100; y <= moment().year() + 100; y++)
+            {
+                lxDatePicker.years.push(y);
+            }
+
+            generateCalendar();
+        }
+
+        function nextMonth()
+        {
+            lxDatePicker.ngModelMoment = lxDatePicker.ngModelMoment.add(1, 'month');
+
+            generateCalendar();
+        }
+
+        function openDatePicker()
+        {
+            LxDatePickerService.open(lxDatePicker.pickerId);
+        }
+
+        function previousMonth()
+        {
+            lxDatePicker.ngModelMoment = lxDatePicker.ngModelMoment.subtract(1, 'month');
+
+            generateCalendar();
+        }
+
+        function select(_day)
+        {
+            if (!_day.disabled)
+            {
+                lxDatePicker.ngModel = _day.toDate();
+                lxDatePicker.ngModelMoment = angular.copy(_day);
+
+                if (angular.isDefined(lxDatePicker.callback))
+                {
+                    lxDatePicker.callback(
+                    {
+                        newDate: lxDatePicker.ngModel
+                    });
+                }
+
+                if (angular.isDefined(modelController) && lxDatePicker.inputFormat)
+                {
+                    modelController.$setViewValue(angular.copy(_day).format(lxDatePicker.inputFormat));
+                    modelController.$render();
+                }
+
+                generateCalendar();
+            }
+        }
+
+        function selectYear(_year)
+        {
+            lxDatePicker.yearSelection = false;
+
+            lxDatePicker.ngModelMoment = lxDatePicker.ngModelMoment.year(_year);
+
+            generateCalendar();
+        }
+    }
+})();
+(function()
+{
+    'use strict';
+
+    angular
+        .module('lumx.date-picker')
+        .service('LxDatePickerService', LxDatePickerService);
+
+    LxDatePickerService.$inject = ['$rootScope', '$timeout', 'LxDepthService', 'LxEventSchedulerService'];
+
+    function LxDatePickerService($rootScope, $timeout, LxDepthService, LxEventSchedulerService)
+    {
+        var service = this;
+        var activeDatePickerId;
+        var datePickerFilter;
+        var idEventScheduler;
+        var scopeMap = {};
+
+        service.close = closeDatePicker;
+        service.open = openDatePicker;
+        service.registerScope = registerScope;
+
+        ////////////
+
+        function closeDatePicker(_datePickerId)
+        {
+            if (angular.isDefined(idEventScheduler))
+            {
+                LxEventSchedulerService.unregister(idEventScheduler);
+                idEventScheduler = undefined;
+            }
+
+            activeDatePickerId = undefined;
+
+            $rootScope.$broadcast('lx-date-picker__close-start', _datePickerId);
+
+            datePickerFilter.removeClass('lx-date-picker-filter--is-shown');
+            scopeMap[_datePickerId].element.removeClass('lx-date-picker--is-shown');
+
+            $timeout(function()
+            {
+                angular.element('body').removeClass('no-scroll-date-picker-' + scopeMap[_datePickerId].uuid);
+
+                datePickerFilter.remove();
+
+                scopeMap[_datePickerId].element
+                    .hide()
+                    .appendTo(scopeMap[_datePickerId].elementParent);
+
+                scopeMap[_datePickerId].isOpen = false;
+                $rootScope.$broadcast('lx-date-picker__close-end', _datePickerId);
+            }, 600);
+        }
+
+        function onKeyUp(_event)
+        {
+            if (_event.keyCode == 27 && angular.isDefined(activeDatePickerId))
+            {
+                closeDatePicker(activeDatePickerId);
+            }
+
+            _event.stopPropagation();
+        }
+
+        function openDatePicker(_datePickerId)
+        {
+            LxDepthService.register();
+
+            activeDatePickerId = _datePickerId;
+
+            angular.element('body').addClass('no-scroll-date-picker-' + scopeMap[_datePickerId].uuid);
+
+            datePickerFilter = angular.element('<div/>',
+            {
+                class: 'lx-date-picker-filter'
+            });
+
+            datePickerFilter
+                .css('z-index', LxDepthService.getDepth())
+                .appendTo('body');
+
+            if (scopeMap[activeDatePickerId].autoClose)
+            {
+                datePickerFilter.on('click', function()
+                {
+                    closeDatePicker(activeDatePickerId);
+                });
+            }
+
+            if (scopeMap[activeDatePickerId].escapeClose)
+            {
+                idEventScheduler = LxEventSchedulerService.register('keyup', onKeyUp);
+            }
+
+            scopeMap[activeDatePickerId].element
+                .css('z-index', LxDepthService.getDepth() + 1)
+                .appendTo('body')
+                .show();
+
+            $timeout(function()
+            {
+                $rootScope.$broadcast('lx-date-picker__open-start', activeDatePickerId);
+
+                scopeMap[activeDatePickerId].isOpen = true;
+
+                datePickerFilter.addClass('lx-date-picker-filter--is-shown');
+                scopeMap[activeDatePickerId].element.addClass('lx-date-picker--is-shown');
+            }, 100);
+
+            $timeout(function()
+            {
+                $rootScope.$broadcast('lx-date-picker__open-end', activeDatePickerId);
+            }, 700);
+        }
+
+        function registerScope(_datePickerId, _datePickerScope)
+        {
+            scopeMap[_datePickerId] = _datePickerScope.lxDatePicker;
+        }
+    }
+})();
+(function()
+{
+    'use strict';
+
+    angular
+        .module('lumx.dialog')
+        .directive('lxDialog', lxDialog)
+        .directive('lxDialogHeader', lxDialogHeader)
+        .directive('lxDialogContent', lxDialogContent)
+        .directive('lxDialogFooter', lxDialogFooter)
+        .directive('lxDialogClose', lxDialogClose);
+
+    function lxDialog()
     {
         return {
             restrict: 'E',
-            templateUrl: 'fab.html',
-            scope: true,
+            template: '<div class="dialog" ng-class="{ \'dialog--l\': !lxDialog.size || lxDialog.size === \'l\', \'dialog--s\': lxDialog.size === \'s\', \'dialog--m\': lxDialog.size === \'m\' }"><div ng-if="lxDialog.isOpen" ng-transclude></div></div>',
+            scope:
+            {
+                autoClose: '=?lxAutoClose',
+                escapeClose: '=?lxEscapeClose',
+                size: '@?lxSize'
+            },
             link: link,
-            controller: LxFabController,
-            controllerAs: 'lxFab',
+            controller: LxDialogController,
+            controllerAs: 'lxDialog',
             bindToController: true,
-            transclude: true,
-            replace: true
+            replace: true,
+            transclude: true
         };
 
         function link(scope, element, attrs, ctrl)
         {
-            attrs.$observe('lxDirection', function(newDirection)
+            attrs.$observe('id', function(_newId)
             {
-                ctrl.setFabDirection(newDirection);
+                ctrl.id = _newId;
             });
         }
     }
 
-    function LxFabController()
-    {
-        var lxFab = this;
+    LxDialogController.$inject = ['$element', '$interval', '$rootScope', '$scope', '$timeout', '$window', 'LxDepthService', 'LxEventSchedulerService', 'LxUtils'];
 
-        lxFab.setFabDirection = setFabDirection;
+    function LxDialogController($element, $interval, $rootScope, $scope, $timeout, $window, LxDepthService, LxEventSchedulerService, LxUtils)
+    {
+        var lxDialog = this;
+        var dialogFilter = angular.element('<div/>',
+        {
+            class: 'dialog-filter'
+        });
+        var dialogHeight;
+        var dialogInterval;
+        var dialogScrollable;
+        var elementParent = $element.parent();
+        var idEventScheduler;
+        var resizeDebounce;
+        var windowHeight;
+
+        lxDialog.autoClose = angular.isDefined(lxDialog.autoClose) ? lxDialog.autoClose : true;
+        lxDialog.escapeClose = angular.isDefined(lxDialog.escapeClose) ? lxDialog.escapeClose : true;
+        lxDialog.isOpen = false;
+        lxDialog.uuid = LxUtils.generateUUID();
+
+        $scope.$on('lx-dialog__open', function(event, id, params)
+        {
+            if (id === lxDialog.id)
+            {
+                open(params);
+            }
+        });
+
+        $scope.$on('lx-dialog__close', function(event, id, canceled, params)
+        {
+            if (id === lxDialog.id)
+            {
+                close(canceled, params);
+            }
+        });
+
+        $scope.$on('$destroy', function()
+        {
+            close(true);
+        });
 
         ////////////
 
-        function setFabDirection(_direction)
+        function checkDialogHeight()
         {
-            lxFab.lxDirection = _direction;
+            var dialog = $element;
+            var dialogHeader = dialog.find('.dialog__header');
+            var dialogContent = dialog.find('.dialog__content');
+            var dialogFooter = dialog.find('.dialog__footer');
+
+            if (!dialogFooter.length)
+            {
+                dialogFooter = dialog.find('.dialog__actions');
+            }
+
+            if (angular.isUndefined(dialogHeader))
+            {
+                return;
+            }
+
+            var heightToCheck = 60 + dialogHeader.outerHeight() + dialogContent.outerHeight() + dialogFooter.outerHeight();
+
+            if (dialogHeight === heightToCheck && windowHeight === $window.innerHeight)
+            {
+                return;
+            }
+
+            dialogHeight = heightToCheck;
+            windowHeight = $window.innerHeight;
+
+            if (heightToCheck >= $window.innerHeight)
+            {
+                dialog.addClass('dialog--is-fixed');
+
+                dialogScrollable
+                    .css(
+                    {
+                        top: dialogHeader.outerHeight(),
+                        bottom: dialogFooter.outerHeight()
+                    })
+                    .off('scroll', checkScrollEnd)
+                    .on('scroll', checkScrollEnd);
+            }
+            else
+            {
+                dialog.removeClass('dialog--is-fixed');
+
+                dialogScrollable
+                    .removeAttr('style')
+                    .off('scroll', checkScrollEnd);
+            }
+        }
+
+        function checkDialogHeightOnResize()
+        {
+            if (resizeDebounce)
+            {
+                $timeout.cancel(resizeDebounce);
+            }
+
+            resizeDebounce = $timeout(function()
+            {
+                checkDialogHeight();
+            }, 200);
+        }
+
+        function checkScrollEnd()
+        {
+            if (dialogScrollable.scrollTop() + dialogScrollable.innerHeight() >= dialogScrollable[0].scrollHeight)
+            {
+                $rootScope.$broadcast('lx-dialog__scroll-end', lxDialog.id);
+
+                dialogScrollable.off('scroll', checkScrollEnd);
+
+                $timeout(function()
+                {
+                    dialogScrollable.on('scroll', checkScrollEnd);
+                }, 500);
+            }
+        }
+
+        function onKeyUp(_event)
+        {
+            if (_event.keyCode == 27)
+            {
+                close(true);
+            }
+
+            _event.stopPropagation();
+        }
+
+        function open(_params)
+        {
+            if (lxDialog.isOpen)
+            {
+                return;
+            }
+
+            LxDepthService.register();
+
+            angular.element('body').addClass('no-scroll-dialog-' + lxDialog.uuid);
+
+            dialogFilter
+                .css('z-index', LxDepthService.getDepth())
+                .appendTo('body');
+
+            if (lxDialog.autoClose)
+            {
+                dialogFilter.on('click', function()
+                {
+                    close(true);
+                });
+            }
+
+            if (lxDialog.escapeClose)
+            {
+                idEventScheduler = LxEventSchedulerService.register('keyup', onKeyUp);
+            }
+
+            $element
+                .css('z-index', LxDepthService.getDepth() + 1)
+                .appendTo('body')
+                .show();
+
+            $timeout(function()
+            {
+                $rootScope.$broadcast('lx-dialog__open-start', lxDialog.id, _params);
+
+                lxDialog.isOpen = true;
+
+                dialogFilter.addClass('dialog-filter--is-shown');
+                $element.addClass('dialog--is-shown');
+            }, 100);
+
+            $timeout(function()
+            {
+                if ($element.find('.dialog__scrollable').length === 0)
+                {
+                    $element.find('.dialog__content').wrap(angular.element('<div/>',
+                    {
+                        class: 'dialog__scrollable'
+                    }));
+                }
+
+                dialogScrollable = $element.find('.dialog__scrollable');
+            }, 200);
+
+            $timeout(function()
+            {
+                $rootScope.$broadcast('lx-dialog__open-end', lxDialog.id, _params);
+            }, 700);
+
+            dialogInterval = $interval(function()
+            {
+                checkDialogHeight();
+            }, 500);
+
+            angular.element($window).on('resize', checkDialogHeightOnResize);
+        }
+
+        function close(_canceled, _params)
+        {
+            if (!lxDialog.isOpen)
+            {
+                return;
+            }
+
+            _params = _params || {};
+
+            if (angular.isDefined(idEventScheduler))
+            {
+                LxEventSchedulerService.unregister(idEventScheduler);
+                idEventScheduler = undefined;
+            }
+
+            angular.element($window).off('resize', checkDialogHeightOnResize);
+            $element.find('.dialog__scrollable').off('scroll', checkScrollEnd);
+
+            $rootScope.$broadcast('lx-dialog__close-start', lxDialog.id, _canceled, _params);
+
+            if (resizeDebounce)
+            {
+                $timeout.cancel(resizeDebounce);
+            }
+
+            $interval.cancel(dialogInterval);
+
+            dialogFilter.removeClass('dialog-filter--is-shown');
+            $element.removeClass('dialog--is-shown');
+
+            $timeout(function()
+            {
+                angular.element('body').removeClass('no-scroll-dialog-' + lxDialog.uuid);
+
+                dialogFilter.remove();
+
+                $element
+                    .hide()
+                    .removeClass('dialog--is-fixed')
+                    .appendTo(elementParent);
+
+                lxDialog.isOpen = false;
+                dialogHeight = undefined;
+                $rootScope.$broadcast('lx-dialog__close-end', lxDialog.id, _canceled, _params);
+            }, 600);
         }
     }
 
-    function lxFabTrigger()
+    function lxDialogHeader()
     {
         return {
             restrict: 'E',
-            require: '^lxFab',
-            templateUrl: 'fab-trigger.html',
-            transclude: true,
-            replace: true
+            template: '<div class="dialog__header" ng-transclude></div>',
+            replace: true,
+            transclude: true
         };
     }
 
-    function lxFabActions()
+    function lxDialogContent()
     {
         return {
             restrict: 'E',
-            require: '^lxFab',
-            templateUrl: 'fab-actions.html',
-            link: link,
-            transclude: true,
-            replace: true
+            template: '<div class="dialog__scrollable"><div class="dialog__content" ng-transclude></div></div>',
+            replace: true,
+            transclude: true
         };
+    }
 
-        function link(scope, element, attrs, ctrl)
+    function lxDialogFooter()
+    {
+        return {
+            restrict: 'E',
+            template: '<div class="dialog__footer" ng-transclude></div>',
+            replace: true,
+            transclude: true
+        };
+    }
+
+    lxDialogClose.$inject = ['LxDialogService'];
+
+    function lxDialogClose(LxDialogService)
+    {
+        return {
+            restrict: 'A',
+            link: function(scope, element)
+            {
+                element.on('click', function()
+                {
+                    LxDialogService.close(element.parents('.dialog').attr('id'), true);
+                });
+
+                scope.$on('$destroy', function()
+                {
+                    element.off();
+                });
+            }
+        };
+    }
+})();
+
+(function()
+{
+    'use strict';
+
+    angular
+        .module('lumx.dialog')
+        .service('LxDialogService', LxDialogService);
+
+    LxDialogService.$inject = ['$rootScope'];
+
+    function LxDialogService($rootScope)
+    {
+        var service = this;
+
+        service.open = open;
+        service.close = close;
+
+        ////////////
+
+        function open(_dialogId, _params)
         {
-            scope.parentCtrl = ctrl;
+            $rootScope.$broadcast('lx-dialog__open', _dialogId, _params);
+        }
+
+        function close(_dialogId, _canceled, _params)
+        {
+            $rootScope.$broadcast('lx-dialog__close', _dialogId, _canceled, _params);
         }
     }
 })();
+
 (function()
 {
     'use strict';
@@ -2700,6 +2625,81 @@
             }
 
             timer = $timeout(setFileName);
+        }
+    }
+})();
+(function()
+{
+    'use strict';
+
+    angular
+        .module('lumx.fab')
+        .directive('lxFab', lxFab)
+        .directive('lxFabTrigger', lxFabTrigger)
+        .directive('lxFabActions', lxFabActions);
+
+    function lxFab()
+    {
+        return {
+            restrict: 'E',
+            templateUrl: 'fab.html',
+            scope: true,
+            link: link,
+            controller: LxFabController,
+            controllerAs: 'lxFab',
+            bindToController: true,
+            transclude: true,
+            replace: true
+        };
+
+        function link(scope, element, attrs, ctrl)
+        {
+            attrs.$observe('lxDirection', function(newDirection)
+            {
+                ctrl.setFabDirection(newDirection);
+            });
+        }
+    }
+
+    function LxFabController()
+    {
+        var lxFab = this;
+
+        lxFab.setFabDirection = setFabDirection;
+
+        ////////////
+
+        function setFabDirection(_direction)
+        {
+            lxFab.lxDirection = _direction;
+        }
+    }
+
+    function lxFabTrigger()
+    {
+        return {
+            restrict: 'E',
+            require: '^lxFab',
+            templateUrl: 'fab-trigger.html',
+            transclude: true,
+            replace: true
+        };
+    }
+
+    function lxFabActions()
+    {
+        return {
+            restrict: 'E',
+            require: '^lxFab',
+            templateUrl: 'fab-actions.html',
+            link: link,
+            transclude: true,
+            replace: true
+        };
+
+        function link(scope, element, attrs, ctrl)
+        {
+            scope.parentCtrl = ctrl;
         }
     }
 })();
