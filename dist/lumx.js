@@ -467,7 +467,7 @@
                 ngFalseValue: '@?',
                 ngModel: '=',
                 ngTrueValue: '@?',
-                theme: '@?lxTheme'
+                lxTheme: '@?'
             },
             controller: LxCheckboxController,
             controllerAs: 'lxCheckbox',
@@ -590,6 +590,7 @@
         };
     }
 })();
+
 (function()
 {
     'use strict';
@@ -1279,6 +1280,379 @@
     'use strict';
 
     angular
+        .module('lumx.dialog')
+        .directive('lxDialog', lxDialog)
+        .directive('lxDialogHeader', lxDialogHeader)
+        .directive('lxDialogContent', lxDialogContent)
+        .directive('lxDialogFooter', lxDialogFooter)
+        .directive('lxDialogClose', lxDialogClose);
+
+    function lxDialog()
+    {
+        return {
+            restrict: 'E',
+            template: '<div class="dialog" ng-class="{ \'dialog--l\': !lxDialog.size || lxDialog.size === \'l\', \'dialog--s\': lxDialog.size === \'s\', \'dialog--m\': lxDialog.size === \'m\' }"><div ng-if="lxDialog.isOpen" ng-transclude></div></div>',
+            scope:
+            {
+                autoClose: '=?lxAutoClose',
+                escapeClose: '=?lxEscapeClose',
+                size: '@?lxSize'
+            },
+            link: link,
+            controller: LxDialogController,
+            controllerAs: 'lxDialog',
+            bindToController: true,
+            replace: true,
+            transclude: true
+        };
+
+        function link(scope, element, attrs, ctrl)
+        {
+            attrs.$observe('id', function(_newId)
+            {
+                ctrl.id = _newId;
+            });
+        }
+    }
+
+    LxDialogController.$inject = ['$element', '$interval', '$rootScope', '$scope', '$timeout', '$window', 'LxDepthService', 'LxEventSchedulerService', 'LxUtils'];
+
+    function LxDialogController($element, $interval, $rootScope, $scope, $timeout, $window, LxDepthService, LxEventSchedulerService, LxUtils)
+    {
+        var lxDialog = this;
+        var dialogFilter = angular.element('<div/>',
+        {
+            class: 'dialog-filter'
+        });
+        var dialogHeight;
+        var dialogInterval;
+        var dialogScrollable;
+        var elementParent = $element.parent();
+        var idEventScheduler;
+        var resizeDebounce;
+        var windowHeight;
+
+        lxDialog.autoClose = angular.isDefined(lxDialog.autoClose) ? lxDialog.autoClose : true;
+        lxDialog.escapeClose = angular.isDefined(lxDialog.escapeClose) ? lxDialog.escapeClose : true;
+        lxDialog.isOpen = false;
+        lxDialog.uuid = LxUtils.generateUUID();
+
+        $scope.$on('lx-dialog__open', function(event, id, params)
+        {
+            if (id === lxDialog.id)
+            {
+                open(params);
+            }
+        });
+
+        $scope.$on('lx-dialog__close', function(event, id, canceled, params)
+        {
+            if (id === lxDialog.id)
+            {
+                close(canceled, params);
+            }
+        });
+
+        $scope.$on('$destroy', function()
+        {
+            close(true);
+        });
+
+        ////////////
+
+        function checkDialogHeight()
+        {
+            var dialog = $element;
+            var dialogHeader = dialog.find('.dialog__header');
+            var dialogContent = dialog.find('.dialog__content');
+            var dialogFooter = dialog.find('.dialog__footer');
+
+            if (!dialogFooter.length)
+            {
+                dialogFooter = dialog.find('.dialog__actions');
+            }
+
+            if (angular.isUndefined(dialogHeader))
+            {
+                return;
+            }
+
+            var heightToCheck = 60 + dialogHeader.outerHeight() + dialogContent.outerHeight() + dialogFooter.outerHeight();
+
+            if (dialogHeight === heightToCheck && windowHeight === $window.innerHeight)
+            {
+                return;
+            }
+
+            dialogHeight = heightToCheck;
+            windowHeight = $window.innerHeight;
+
+            if (heightToCheck >= $window.innerHeight)
+            {
+                dialog.addClass('dialog--is-fixed');
+
+                dialogScrollable
+                    .css(
+                    {
+                        top: dialogHeader.outerHeight(),
+                        bottom: dialogFooter.outerHeight()
+                    })
+                    .off('scroll', checkScrollEnd)
+                    .on('scroll', checkScrollEnd);
+            }
+            else
+            {
+                dialog.removeClass('dialog--is-fixed');
+
+                dialogScrollable
+                    .removeAttr('style')
+                    .off('scroll', checkScrollEnd);
+            }
+        }
+
+        function checkDialogHeightOnResize()
+        {
+            if (resizeDebounce)
+            {
+                $timeout.cancel(resizeDebounce);
+            }
+
+            resizeDebounce = $timeout(function()
+            {
+                checkDialogHeight();
+            }, 200);
+        }
+
+        function checkScrollEnd()
+        {
+            if (dialogScrollable.scrollTop() + dialogScrollable.innerHeight() >= dialogScrollable[0].scrollHeight)
+            {
+                $rootScope.$broadcast('lx-dialog__scroll-end', lxDialog.id);
+
+                dialogScrollable.off('scroll', checkScrollEnd);
+
+                $timeout(function()
+                {
+                    dialogScrollable.on('scroll', checkScrollEnd);
+                }, 500);
+            }
+        }
+
+        function onKeyUp(_event)
+        {
+            if (_event.keyCode == 27)
+            {
+                close(true);
+            }
+
+            _event.stopPropagation();
+        }
+
+        function open(_params)
+        {
+            if (lxDialog.isOpen)
+            {
+                return;
+            }
+
+            LxDepthService.register();
+
+            angular.element('body').addClass('no-scroll-dialog-' + lxDialog.uuid);
+
+            dialogFilter
+                .css('z-index', LxDepthService.getDepth())
+                .appendTo('body');
+
+            if (lxDialog.autoClose)
+            {
+                dialogFilter.on('click', function()
+                {
+                    close(true);
+                });
+            }
+
+            if (lxDialog.escapeClose)
+            {
+                idEventScheduler = LxEventSchedulerService.register('keyup', onKeyUp);
+            }
+
+            $element
+                .css('z-index', LxDepthService.getDepth() + 1)
+                .appendTo('body')
+                .show();
+
+            $timeout(function()
+            {
+                $rootScope.$broadcast('lx-dialog__open-start', lxDialog.id, _params);
+
+                lxDialog.isOpen = true;
+
+                dialogFilter.addClass('dialog-filter--is-shown');
+                $element.addClass('dialog--is-shown');
+            }, 100);
+
+            $timeout(function()
+            {
+                if ($element.find('.dialog__scrollable').length === 0)
+                {
+                    $element.find('.dialog__content').wrap(angular.element('<div/>',
+                    {
+                        class: 'dialog__scrollable'
+                    }));
+                }
+
+                dialogScrollable = $element.find('.dialog__scrollable');
+            }, 200);
+
+            $timeout(function()
+            {
+                $rootScope.$broadcast('lx-dialog__open-end', lxDialog.id, _params);
+            }, 700);
+
+            dialogInterval = $interval(function()
+            {
+                checkDialogHeight();
+            }, 500);
+
+            angular.element($window).on('resize', checkDialogHeightOnResize);
+        }
+
+        function close(_canceled, _params)
+        {
+            if (!lxDialog.isOpen)
+            {
+                return;
+            }
+
+            _params = _params || {};
+
+            if (angular.isDefined(idEventScheduler))
+            {
+                LxEventSchedulerService.unregister(idEventScheduler);
+                idEventScheduler = undefined;
+            }
+
+            angular.element($window).off('resize', checkDialogHeightOnResize);
+            $element.find('.dialog__scrollable').off('scroll', checkScrollEnd);
+
+            $rootScope.$broadcast('lx-dialog__close-start', lxDialog.id, _canceled, _params);
+
+            if (resizeDebounce)
+            {
+                $timeout.cancel(resizeDebounce);
+            }
+
+            $interval.cancel(dialogInterval);
+
+            dialogFilter.removeClass('dialog-filter--is-shown');
+            $element.removeClass('dialog--is-shown');
+
+            $timeout(function()
+            {
+                angular.element('body').removeClass('no-scroll-dialog-' + lxDialog.uuid);
+
+                dialogFilter.remove();
+
+                $element
+                    .hide()
+                    .removeClass('dialog--is-fixed')
+                    .appendTo(elementParent);
+
+                lxDialog.isOpen = false;
+                dialogHeight = undefined;
+                $rootScope.$broadcast('lx-dialog__close-end', lxDialog.id, _canceled, _params);
+            }, 600);
+        }
+    }
+
+    function lxDialogHeader()
+    {
+        return {
+            restrict: 'E',
+            template: '<div class="dialog__header" ng-transclude></div>',
+            replace: true,
+            transclude: true
+        };
+    }
+
+    function lxDialogContent()
+    {
+        return {
+            restrict: 'E',
+            template: '<div class="dialog__scrollable"><div class="dialog__content" ng-transclude></div></div>',
+            replace: true,
+            transclude: true
+        };
+    }
+
+    function lxDialogFooter()
+    {
+        return {
+            restrict: 'E',
+            template: '<div class="dialog__footer" ng-transclude></div>',
+            replace: true,
+            transclude: true
+        };
+    }
+
+    lxDialogClose.$inject = ['LxDialogService'];
+
+    function lxDialogClose(LxDialogService)
+    {
+        return {
+            restrict: 'A',
+            link: function(scope, element)
+            {
+                element.on('click', function()
+                {
+                    LxDialogService.close(element.parents('.dialog').attr('id'), true);
+                });
+
+                scope.$on('$destroy', function()
+                {
+                    element.off();
+                });
+            }
+        };
+    }
+})();
+
+(function()
+{
+    'use strict';
+
+    angular
+        .module('lumx.dialog')
+        .service('LxDialogService', LxDialogService);
+
+    LxDialogService.$inject = ['$rootScope'];
+
+    function LxDialogService($rootScope)
+    {
+        var service = this;
+
+        service.open = open;
+        service.close = close;
+
+        ////////////
+
+        function open(_dialogId, _params)
+        {
+            $rootScope.$broadcast('lx-dialog__open', _dialogId, _params);
+        }
+
+        function close(_dialogId, _canceled, _params)
+        {
+            $rootScope.$broadcast('lx-dialog__close', _dialogId, _canceled, _params);
+        }
+    }
+})();
+
+(function()
+{
+    'use strict';
+
+    angular
         .module('lumx.dropdown')
         .directive('lxDropdown', lxDropdown)
         .directive('lxDropdownToggle', lxDropdownToggle)
@@ -1292,7 +1666,6 @@
             templateUrl: 'dropdown.html',
             scope:
             {
-                depth: '@?lxDepth',
                 effect: '@?lxEffect',
                 escapeClose: '=?lxEscapeClose',
                 hover: '=?lxHover',
@@ -2056,23 +2429,9 @@
 
         ////////////
 
-        function addDropdownDepth()
-        {
-            if (lxDropdownMenu.parentCtrl.depth)
-            {
-                $element.addClass('dropdown-menu--depth-' + lxDropdownMenu.parentCtrl.depth);
-            }
-            else
-            {
-                $element.addClass('dropdown-menu--depth-1');
-            }
-        }
-
         function setParentController(_parentCtrl)
         {
             lxDropdownMenu.parentCtrl = _parentCtrl;
-
-            addDropdownDepth();
         }
     }
 
@@ -2175,379 +2534,6 @@
         }
     }
 })();
-(function()
-{
-    'use strict';
-
-    angular
-        .module('lumx.dialog')
-        .directive('lxDialog', lxDialog)
-        .directive('lxDialogHeader', lxDialogHeader)
-        .directive('lxDialogContent', lxDialogContent)
-        .directive('lxDialogFooter', lxDialogFooter)
-        .directive('lxDialogClose', lxDialogClose);
-
-    function lxDialog()
-    {
-        return {
-            restrict: 'E',
-            template: '<div class="dialog" ng-class="{ \'dialog--l\': !lxDialog.size || lxDialog.size === \'l\', \'dialog--s\': lxDialog.size === \'s\', \'dialog--m\': lxDialog.size === \'m\' }"><div ng-if="lxDialog.isOpen" ng-transclude></div></div>',
-            scope:
-            {
-                autoClose: '=?lxAutoClose',
-                escapeClose: '=?lxEscapeClose',
-                size: '@?lxSize'
-            },
-            link: link,
-            controller: LxDialogController,
-            controllerAs: 'lxDialog',
-            bindToController: true,
-            replace: true,
-            transclude: true
-        };
-
-        function link(scope, element, attrs, ctrl)
-        {
-            attrs.$observe('id', function(_newId)
-            {
-                ctrl.id = _newId;
-            });
-        }
-    }
-
-    LxDialogController.$inject = ['$element', '$interval', '$rootScope', '$scope', '$timeout', '$window', 'LxDepthService', 'LxEventSchedulerService', 'LxUtils'];
-
-    function LxDialogController($element, $interval, $rootScope, $scope, $timeout, $window, LxDepthService, LxEventSchedulerService, LxUtils)
-    {
-        var lxDialog = this;
-        var dialogFilter = angular.element('<div/>',
-        {
-            class: 'dialog-filter'
-        });
-        var dialogHeight;
-        var dialogInterval;
-        var dialogScrollable;
-        var elementParent = $element.parent();
-        var idEventScheduler;
-        var resizeDebounce;
-        var windowHeight;
-
-        lxDialog.autoClose = angular.isDefined(lxDialog.autoClose) ? lxDialog.autoClose : true;
-        lxDialog.escapeClose = angular.isDefined(lxDialog.escapeClose) ? lxDialog.escapeClose : true;
-        lxDialog.isOpen = false;
-        lxDialog.uuid = LxUtils.generateUUID();
-
-        $scope.$on('lx-dialog__open', function(event, id, params)
-        {
-            if (id === lxDialog.id)
-            {
-                open(params);
-            }
-        });
-
-        $scope.$on('lx-dialog__close', function(event, id, canceled, params)
-        {
-            if (id === lxDialog.id)
-            {
-                close(canceled, params);
-            }
-        });
-
-        $scope.$on('$destroy', function()
-        {
-            close(true);
-        });
-
-        ////////////
-
-        function checkDialogHeight()
-        {
-            var dialog = $element;
-            var dialogHeader = dialog.find('.dialog__header');
-            var dialogContent = dialog.find('.dialog__content');
-            var dialogFooter = dialog.find('.dialog__footer');
-
-            if (!dialogFooter.length)
-            {
-                dialogFooter = dialog.find('.dialog__actions');
-            }
-
-            if (angular.isUndefined(dialogHeader))
-            {
-                return;
-            }
-
-            var heightToCheck = 60 + dialogHeader.outerHeight() + dialogContent.outerHeight() + dialogFooter.outerHeight();
-
-            if (dialogHeight === heightToCheck && windowHeight === $window.innerHeight)
-            {
-                return;
-            }
-
-            dialogHeight = heightToCheck;
-            windowHeight = $window.innerHeight;
-
-            if (heightToCheck >= $window.innerHeight)
-            {
-                dialog.addClass('dialog--is-fixed');
-
-                dialogScrollable
-                    .css(
-                    {
-                        top: dialogHeader.outerHeight(),
-                        bottom: dialogFooter.outerHeight()
-                    })
-                    .off('scroll', checkScrollEnd)
-                    .on('scroll', checkScrollEnd);
-            }
-            else
-            {
-                dialog.removeClass('dialog--is-fixed');
-
-                dialogScrollable
-                    .removeAttr('style')
-                    .off('scroll', checkScrollEnd);
-            }
-        }
-
-        function checkDialogHeightOnResize()
-        {
-            if (resizeDebounce)
-            {
-                $timeout.cancel(resizeDebounce);
-            }
-
-            resizeDebounce = $timeout(function()
-            {
-                checkDialogHeight();
-            }, 200);
-        }
-
-        function checkScrollEnd()
-        {
-            if (dialogScrollable.scrollTop() + dialogScrollable.innerHeight() >= dialogScrollable[0].scrollHeight)
-            {
-                $rootScope.$broadcast('lx-dialog__scroll-end', lxDialog.id);
-
-                dialogScrollable.off('scroll', checkScrollEnd);
-
-                $timeout(function()
-                {
-                    dialogScrollable.on('scroll', checkScrollEnd);
-                }, 500);
-            }
-        }
-
-        function onKeyUp(_event)
-        {
-            if (_event.keyCode == 27)
-            {
-                close(true);
-            }
-
-            _event.stopPropagation();
-        }
-
-        function open(_params)
-        {
-            if (lxDialog.isOpen)
-            {
-                return;
-            }
-
-            LxDepthService.register();
-
-            angular.element('body').addClass('no-scroll-dialog-' + lxDialog.uuid);
-
-            dialogFilter
-                .css('z-index', LxDepthService.getDepth())
-                .appendTo('body');
-
-            if (lxDialog.autoClose)
-            {
-                dialogFilter.on('click', function()
-                {
-                    close(true);
-                });
-            }
-
-            if (lxDialog.escapeClose)
-            {
-                idEventScheduler = LxEventSchedulerService.register('keyup', onKeyUp);
-            }
-
-            $element
-                .css('z-index', LxDepthService.getDepth() + 1)
-                .appendTo('body')
-                .show();
-
-            $timeout(function()
-            {
-                $rootScope.$broadcast('lx-dialog__open-start', lxDialog.id, _params);
-
-                lxDialog.isOpen = true;
-
-                dialogFilter.addClass('dialog-filter--is-shown');
-                $element.addClass('dialog--is-shown');
-            }, 100);
-
-            $timeout(function()
-            {
-                if ($element.find('.dialog__scrollable').length === 0)
-                {
-                    $element.find('.dialog__content').wrap(angular.element('<div/>',
-                    {
-                        class: 'dialog__scrollable'
-                    }));
-                }
-
-                dialogScrollable = $element.find('.dialog__scrollable');
-            }, 200);
-
-            $timeout(function()
-            {
-                $rootScope.$broadcast('lx-dialog__open-end', lxDialog.id, _params);
-            }, 700);
-
-            dialogInterval = $interval(function()
-            {
-                checkDialogHeight();
-            }, 500);
-
-            angular.element($window).on('resize', checkDialogHeightOnResize);
-        }
-
-        function close(_canceled, _params)
-        {
-            if (!lxDialog.isOpen)
-            {
-                return;
-            }
-
-            _params = _params || {};
-
-            if (angular.isDefined(idEventScheduler))
-            {
-                LxEventSchedulerService.unregister(idEventScheduler);
-                idEventScheduler = undefined;
-            }
-
-            angular.element($window).off('resize', checkDialogHeightOnResize);
-            $element.find('.dialog__scrollable').off('scroll', checkScrollEnd);
-
-            $rootScope.$broadcast('lx-dialog__close-start', lxDialog.id, _canceled, _params);
-
-            if (resizeDebounce)
-            {
-                $timeout.cancel(resizeDebounce);
-            }
-
-            $interval.cancel(dialogInterval);
-
-            dialogFilter.removeClass('dialog-filter--is-shown');
-            $element.removeClass('dialog--is-shown');
-
-            $timeout(function()
-            {
-                angular.element('body').removeClass('no-scroll-dialog-' + lxDialog.uuid);
-
-                dialogFilter.remove();
-
-                $element
-                    .hide()
-                    .removeClass('dialog--is-fixed')
-                    .appendTo(elementParent);
-
-                lxDialog.isOpen = false;
-                dialogHeight = undefined;
-                $rootScope.$broadcast('lx-dialog__close-end', lxDialog.id, _canceled, _params);
-            }, 600);
-        }
-    }
-
-    function lxDialogHeader()
-    {
-        return {
-            restrict: 'E',
-            template: '<div class="dialog__header" ng-transclude></div>',
-            replace: true,
-            transclude: true
-        };
-    }
-
-    function lxDialogContent()
-    {
-        return {
-            restrict: 'E',
-            template: '<div class="dialog__scrollable"><div class="dialog__content" ng-transclude></div></div>',
-            replace: true,
-            transclude: true
-        };
-    }
-
-    function lxDialogFooter()
-    {
-        return {
-            restrict: 'E',
-            template: '<div class="dialog__footer" ng-transclude></div>',
-            replace: true,
-            transclude: true
-        };
-    }
-
-    lxDialogClose.$inject = ['LxDialogService'];
-
-    function lxDialogClose(LxDialogService)
-    {
-        return {
-            restrict: 'A',
-            link: function(scope, element)
-            {
-                element.on('click', function()
-                {
-                    LxDialogService.close(element.parents('.dialog').attr('id'), true);
-                });
-
-                scope.$on('$destroy', function()
-                {
-                    element.off();
-                });
-            }
-        };
-    }
-})();
-
-(function()
-{
-    'use strict';
-
-    angular
-        .module('lumx.dialog')
-        .service('LxDialogService', LxDialogService);
-
-    LxDialogService.$inject = ['$rootScope'];
-
-    function LxDialogService($rootScope)
-    {
-        var service = this;
-
-        service.open = open;
-        service.close = close;
-
-        ////////////
-
-        function open(_dialogId, _params)
-        {
-            $rootScope.$broadcast('lx-dialog__open', _dialogId, _params);
-        }
-
-        function close(_dialogId, _canceled, _params)
-        {
-            $rootScope.$broadcast('lx-dialog__close', _dialogId, _canceled, _params);
-        }
-    }
-})();
-
 (function()
 {
     'use strict';
@@ -2964,7 +2950,7 @@
             // Use of `this` for override purpose.
             var notification = this.buildNotification(_text, _icon, _color, _action);
             /*jshint ignore:end*/
-            
+
             var notificationTimeout;
             var notificationDelay = _delay || 6000;
 
@@ -3036,7 +3022,7 @@
 
             var dialogActions = angular.element('<div/>',
             {
-                class: 'dialog__actions'
+                class: 'dialog__footer'
             });
 
             var dialogLastBtn = angular.element('<button/>',
@@ -3345,7 +3331,8 @@
                 ngDisabled: '=?',
                 ngModel: '=',
                 ngValue: '=?',
-                value: '@?'
+                value: '@?',
+                lxTheme: '@?'
             },
             controller: LxRadioButtonController,
             controllerAs: 'lxRadioButton',
@@ -3469,6 +3456,93 @@
             transclude: true,
             replace: true
         };
+    }
+})();
+
+(function()
+{
+    'use strict';
+
+    angular
+        .module('lumx.ripple')
+        .directive('lxRipple', lxRipple);
+
+    lxRipple.$inject = ['$timeout'];
+
+    function lxRipple($timeout)
+    {
+        return {
+            restrict: 'A',
+            link: link,
+        };
+
+        function link(scope, element, attrs)
+        {
+            var timer;
+
+            element
+                .css(
+                {
+                    position: 'relative',
+                    overflow: 'hidden'
+                })
+                .on('mousedown', function(e)
+                {
+                    var ripple;
+
+                    if (element.find('.ripple').length === 0)
+                    {
+                        ripple = angular.element('<span/>',
+                        {
+                            class: 'ripple'
+                        });
+
+                        if (attrs.lxRipple)
+                        {
+                            ripple.addClass('bgc-' + attrs.lxRipple);
+                        }
+
+                        element.prepend(ripple);
+                    }
+                    else
+                    {
+                        ripple = element.find('.ripple');
+                    }
+
+                    ripple.removeClass('ripple--is-animated');
+
+                    if (!ripple.height() && !ripple.width())
+                    {
+                        var diameter = Math.max(element.outerWidth(), element.outerHeight());
+
+                        ripple.css(
+                        {
+                            height: diameter,
+                            width: diameter
+                        });
+                    }
+
+                    var x = e.pageX - element.offset().left - ripple.width() / 2;
+                    var y = e.pageY - element.offset().top - ripple.height() / 2;
+
+                    ripple.css(
+                    {
+                        top: y + 'px',
+                        left: x + 'px'
+                    }).addClass('ripple--is-animated');
+
+                    timer = $timeout(function()
+                    {
+                        ripple.removeClass('ripple--is-animated');
+                    }, 651);
+                });
+
+            scope.$on('$destroy', function()
+            {
+                $timeout.cancel(timer);
+                element.off();
+            });
+        }
     }
 })();
 (function()
@@ -3846,92 +3920,6 @@
             itemSelected = false;
 
             return _newValue;
-        }
-    }
-})();
-(function()
-{
-    'use strict';
-
-    angular
-        .module('lumx.ripple')
-        .directive('lxRipple', lxRipple);
-
-    lxRipple.$inject = ['$timeout'];
-
-    function lxRipple($timeout)
-    {
-        return {
-            restrict: 'A',
-            link: link,
-        };
-
-        function link(scope, element, attrs)
-        {
-            var timer;
-
-            element
-                .css(
-                {
-                    position: 'relative',
-                    overflow: 'hidden'
-                })
-                .on('mousedown', function(e)
-                {
-                    var ripple;
-
-                    if (element.find('.ripple').length === 0)
-                    {
-                        ripple = angular.element('<span/>',
-                        {
-                            class: 'ripple'
-                        });
-
-                        if (attrs.lxRipple)
-                        {
-                            ripple.addClass('bgc-' + attrs.lxRipple);
-                        }
-
-                        element.prepend(ripple);
-                    }
-                    else
-                    {
-                        ripple = element.find('.ripple');
-                    }
-
-                    ripple.removeClass('ripple--is-animated');
-
-                    if (!ripple.height() && !ripple.width())
-                    {
-                        var diameter = Math.max(element.outerWidth(), element.outerHeight());
-
-                        ripple.css(
-                        {
-                            height: diameter,
-                            width: diameter
-                        });
-                    }
-
-                    var x = e.pageX - element.offset().left - ripple.width() / 2;
-                    var y = e.pageY - element.offset().top - ripple.height() / 2;
-
-                    ripple.css(
-                    {
-                        top: y + 'px',
-                        left: x + 'px'
-                    }).addClass('ripple--is-animated');
-
-                    timer = $timeout(function()
-                    {
-                        ripple.removeClass('ripple--is-animated');
-                    }, 651);
-                });
-
-            scope.$on('$destroy', function()
-            {
-                $timeout.cancel(timer);
-                element.off();
-            });
         }
     }
 })();
@@ -5234,7 +5222,8 @@
                 ngChange: '&?',
                 ngDisabled: '=?',
                 lxColor: '@?',
-                lxPosition: '@?'
+                lxPosition: '@?',
+                lxTheme: '@?'
             },
             controller: LxSwitchController,
             controllerAs: 'lxSwitch',
@@ -5358,6 +5347,7 @@
         };
     }
 })();
+
 (function()
 {
     'use strict';
@@ -6486,8 +6476,8 @@ angular.module("lumx.button").run(['$templateCache', function(a) { a.put('link.h
     '');
 	 }]);
 angular.module("lumx.checkbox").run(['$templateCache', function(a) { a.put('checkbox.html', '<div class="checkbox checkbox--{{ lxCheckbox.lxColor }}"\n' +
-    '     ng-class="{ \'checkbox--theme-light\': !lxCheckbox.theme || lxCheckbox.theme === \'light\',\n' +
-    '                 \'checkbox--theme-dark\': lxCheckbox.theme === \'dark\' }" >\n' +
+    '     ng-class="{ \'checkbox--theme-light\': !lxCheckbox.lxTheme || lxCheckbox.lxTheme === \'light\',\n' +
+    '                 \'checkbox--theme-dark\': lxCheckbox.lxTheme === \'dark\' }">\n' +
     '    <input id="{{ lxCheckbox.getCheckboxId() }}"\n' +
     '           type="checkbox"\n' +
     '           class="checkbox__input"\n' +
@@ -6497,7 +6487,6 @@ angular.module("lumx.checkbox").run(['$templateCache', function(a) { a.put('chec
     '           ng-false-value="{{ lxCheckbox.ngFalseValue }}"\n' +
     '           ng-change="lxCheckbox.triggerNgChange()"\n' +
     '           ng-disabled="lxCheckbox.ngDisabled">\n' +
-    '\n' +
     '    <label for="{{ lxCheckbox.getCheckboxId() }}" class="checkbox__label" ng-transclude ng-if="!lxCheckbox.getCheckboxHasChildren()"></label>\n' +
     '    <ng-transclude-replace ng-if="lxCheckbox.getCheckboxHasChildren()"></ng-transclude-replace>\n' +
     '</div>\n' +
@@ -6509,7 +6498,9 @@ angular.module("lumx.checkbox").run(['$templateCache', function(a) { a.put('chec
 	 }]);
 angular.module("lumx.radio-button").run(['$templateCache', function(a) { a.put('radio-group.html', '<div class="radio-group" ng-transclude></div>\n' +
     '');
-	a.put('radio-button.html', '<div class="radio-button radio-button--{{ lxRadioButton.lxColor }}">\n' +
+	a.put('radio-button.html', '<div class="radio-button radio-button--{{ lxRadioButton.lxColor }}"\n' +
+    '     ng-class="{ \'radio-button--theme-light\': !lxRadioButton.lxTheme || lxRadioButton.lxTheme === \'light\',\n' +
+    '                 \'radio-button--theme-dark\': lxRadioButton.lxTheme === \'dark\' }">\n' +
     '    <input id="{{ lxRadioButton.getRadioButtonId() }}"\n' +
     '           type="radio"\n' +
     '           class="radio-button__input"\n' +
@@ -6518,7 +6509,6 @@ angular.module("lumx.radio-button").run(['$templateCache', function(a) { a.put('
     '           ng-value="lxRadioButton.ngValue"\n' +
     '           ng-change="lxRadioButton.triggerNgChange()"\n' +
     '           ng-disabled="lxRadioButton.ngDisabled">\n' +
-    '\n' +
     '    <label for="{{ lxRadioButton.getRadioButtonId() }}" class="radio-button__label" ng-transclude ng-if="!lxRadioButton.getRadioButtonHasChildren()"></label>\n' +
     '    <ng-transclude-replace ng-if="lxRadioButton.getRadioButtonHasChildren()"></ng-transclude-replace>\n' +
     '</div>\n' +
@@ -6597,7 +6587,9 @@ angular.module("lumx.stepper").run(['$templateCache', function(a) { a.put('stepp
     '    </div>\n' +
     '</div>');
 	 }]);
-angular.module("lumx.switch").run(['$templateCache', function(a) { a.put('switch.html', '<div class="switch switch--{{ lxSwitch.lxColor }} switch--{{ lxSwitch.lxPosition }}">\n' +
+angular.module("lumx.switch").run(['$templateCache', function(a) { a.put('switch.html', '<div class="switch switch--{{ lxSwitch.lxColor }} switch--{{ lxSwitch.lxPosition }}"\n' +
+    '     ng-class="{ \'switch--theme-light\': !lxSwitch.lxTheme || lxSwitch.lxTheme === \'light\',\n' +
+    '                 \'switch--theme-dark\': lxSwitch.lxTheme === \'dark\' }">\n' +
     '    <input id="{{ lxSwitch.getSwitchId() }}"\n' +
     '           type="checkbox"\n' +
     '           class="switch__input"\n' +
